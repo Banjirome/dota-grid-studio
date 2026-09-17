@@ -1,0 +1,45 @@
+# Wails / production output
+/build/bin/
+/frontend/dist/
+/*.exe
+*.syso
+
+# JavaScript dependencies and package-manager logs
+/node_modules/
+/frontend/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Go test and coverage output
+*.test
+*.out
+coverage/
+coverage.*
+/vendor/
+.gocache
+
+# Runtime files created next to the executable
+dota-grid-studio.settings.json
+hero_grid_config.backup-*.json
+
+# Environment and temporary files
+.env
+.env.*
+!.env.example
+*.log
+*.tmp
+*.temp
+*~
+
+# Editors
+/.idea/
+/.vscode/
+*.swp
+*.swo
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini
