@@ -124,3 +124,36 @@ export function getCategoryLayoutBounds(ctx: CanvasRenderingContext2D, category:
     maxY: Math.max(category.y_position + category.height, textTop + DOTA_LABEL_STYLE.size),
   }
 }
+
+export type GlyphOffset = {dx: number; dy: number}
+
+export const DOTA_FONT_CSS = `${DOTA_LABEL_STYLE.weight} ${DOTA_LABEL_STYLE.size}px "${DOTA_LABEL_STYLE.family}"`
+
+/** Resolves once the embedded Radiance font is usable for canvas measurement. */
+export function ensureDotaFont() {
+  return window.document.fonts.load(DOTA_FONT_CSS)
+}
+
+/**
+ * Offset from a category's top-left corner to the visual centre of its single-symbol label at scale 1.
+ * Used to place generated symbols so that the glyph itself, not the category box, sits on the traced contour.
+ */
+export function measureGlyphOffsets(symbols: readonly string[]): Map<string, GlyphOffset> {
+  const ctx = window.document.createElement('canvas').getContext('2d')!
+  setDotaFont(ctx, 1)
+  ctx.textAlign = 'left'
+  ctx.textBaseline = 'middle'
+  const result = new Map<string, GlyphOffset>()
+  for (const symbol of symbols) {
+    const metrics = ctx.measureText(symbol.toLocaleUpperCase())
+    const left = metrics.actualBoundingBoxLeft ?? 0
+    const right = metrics.actualBoundingBoxRight ?? metrics.width
+    const ascent = metrics.actualBoundingBoxAscent ?? DOTA_LABEL_STYLE.size / 2
+    const descent = metrics.actualBoundingBoxDescent ?? DOTA_LABEL_STYLE.size / 2
+    result.set(symbol, {
+      dx: DOTA_LABEL_STYLE.paddingLeft + (right - left) / 2,
+      dy: DOTA_LABEL_STYLE.controlHeight / 2 + (descent - ascent) / 2,
+    })
+  }
+  return result
+}

@@ -1,5 +1,6 @@
-import {DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState} from 'react'
+import {ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import './App.css'
+import TraceModal from './TraceModal'
 import {FilePayload, exportPNG, getLaunchOptions, hasNativeBackend, loadAppSettings, openDotaJSON, readDotaJSON, readReferenceImage, saveAppSettings, saveDotaJSON} from './backend'
 import {OnFileDrop, OnFileDropOff} from '../wailsjs/runtime/runtime'
 import {
@@ -90,8 +91,11 @@ function App() {
   const [referenceImages, setReferenceImages] = useState<ReferenceImage[]>([])
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(null)
   const [dropActive, setDropActive] = useState(false)
+  const [traceReferenceId, setTraceReferenceId] = useState<string | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const traceFileInputRef = useRef<HTMLInputElement>(null)
+  const traceOpenRef = useRef(false)
   const pointerRef = useRef<PointerAction | null>(null)
   const historyRef = useRef<{past: DotaDocument[]; future: DotaDocument[]}>({past: [], future: []})
   const clipboardRef = useRef<DotaCategory[]>([])
@@ -113,10 +117,13 @@ function App() {
   const primaryIndex = selected.length ? selected[selected.length - 1] : -1
   const primary = categories[primaryIndex]
   const selectedReference = referenceImages.find(item => item.id === selectedReferenceId)
+  const traceReference = referenceImages.find(item => item.id === traceReferenceId)
+  const traceImageElement = traceReferenceId ? referenceElementsRef.current.get(traceReferenceId) : undefined
   const commandLabels = useMemo(() => commandLabelsForPalette(palette), [palette])
 
   useEffect(() => { documentRef.current = document }, [document])
   useEffect(() => { selectedRef.current = selected }, [selected])
+  useEffect(() => { traceOpenRef.current = traceReferenceId !== null }, [traceReferenceId])
 
   const updateRenderSetting = <K extends keyof RenderSettings,>(key: K, value: RenderSettings[K]) => {
     setRenderSettings(current => ({...current, [key]: value}))
@@ -646,15 +653,20 @@ function App() {
     else scheduleDraw()
   }
 
+  const removeReference = useCallback((referenceId: string) => {
+    setReferenceImages(current => current.filter(item => {
+      if (item.id !== referenceId) return true
+      URL.revokeObjectURL(item.src)
+      referenceElementsRef.current.delete(item.id)
+      return false
+    }))
+    setSelectedReferenceId(current => current === referenceId ? null : current)
+    setTraceReferenceId(current => current === referenceId ? null : current)
+  }, [])
+
   const deleteSelected = useCallback(() => {
     if (selectedReferenceId) {
-      setReferenceImages(current => current.filter(item => {
-        if (item.id !== selectedReferenceId) return true
-        URL.revokeObjectURL(item.src)
-        referenceElementsRef.current.delete(item.id)
-        return false
-      }))
-      setSelectedReferenceId(null)
+      removeReference(selectedReferenceId)
       setStatus('Deleted reference image')
       return
     }
@@ -662,7 +674,7 @@ function App() {
     if (!chosen.size) return
     commit(current => ({...current, configs: current.configs.map((cfg, ci) => ci === configIndex ? {...cfg, categories: cfg.categories.filter((_, index) => !chosen.has(index))} : cfg)}))
     setSelected([]); setHidden(new Set()); setLocked(new Set()); setStatus(`Deleted ${chosen.size} element${chosen.size === 1 ? '' : 's'}`)
-  }, [commit, configIndex, selectedReferenceId])
+  }, [commit, configIndex, removeReference, selectedReferenceId])
 
   const duplicateSelected = useCallback(() => {
     const items = selectedRef.current.map(index => documentRef.current.configs[configIndex]?.categories[index]).filter(Boolean).map(item => ({...clone(item), x_position: item.x_position + 10, y_position: item.y_position + 10}))
@@ -701,6 +713,7 @@ function App() {
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
+      if (traceOpenRef.current) return
       const editing = event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement
       if (event.code === 'Space' && !editing) { event.preventDefault(); setSpaceDown(true) }
       if (editing) return
@@ -807,16 +820,49 @@ function App() {
     setReferenceImages(current => [...current, reference])
     setSelected([]); setSelectedReferenceId(id); setTool('select')
     setStatus(`Added reference ${name}`)
+    return id
   }
 
   const addReferenceImage = async (file: File, point: {x: number; y: number}, offset: number) => {
     const src = URL.createObjectURL(file)
     try {
-      await addReferenceSource(file.name, src, point, offset)
+      return await addReferenceSource(file.name, src, point, offset)
     } catch (error) {
       URL.revokeObjectURL(src)
       throw error
     }
+  }
+
+  const canvasCenterPoint = () => {
+    const rect = canvasRef.current?.getBoundingClientRect()
+    return {x: (rect?.width ?? 800) / 2, y: (rect?.height ?? 600) / 2}
+  }
+
+  const onTraceFilePicked = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      setTraceReferenceId(await addReferenceImage(file, canvasCenterPoint(), 0))
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const insertTracedCategories = (items: DotaCategory[], options: {deleteReference: boolean}) => {
+    const referenceId = traceReferenceId
+    const start = documentRef.current.configs[configIndex]?.categories.length ?? 0
+    if (items.length) {
+      commit(current => ({...current, configs: current.configs.map((cfg, ci) => ci === configIndex ? {...cfg, categories: [...cfg.categories, ...items]} : cfg)}))
+      const nextSelection = items.map((_, index) => start + index)
+      selectedRef.current = nextSelection
+      setSelected(nextSelection)
+    }
+    if (options.deleteReference && referenceId) removeReference(referenceId)
+    setSelectedReferenceId(null)
+    setTraceReferenceId(null)
+    setTool('select')
+    setStatus(`Inserted ${items.length} traced element${items.length === 1 ? '' : 's'}`)
   }
 
   useEffect(() => {
@@ -1087,8 +1133,10 @@ function App() {
         <nav className="menu">
           <button onClick={newDocument}>New</button><button onClick={openFile}>Open</button><button onClick={() => saveFile(false)}>Save</button>
           <button onClick={() => saveFile(true)}>Export JSON</button><button onClick={exportImage}>Export PNG</button>
+          <span className="menu-divider"/><button onClick={() => traceFileInputRef.current?.click()} title="Generate a symbol grid from an image">Trace image…</button>
           <span className="menu-divider"/><button onClick={undo}>Undo</button><button onClick={redo}>Redo</button><button onClick={() => setSettingsOpen(true)}>Settings</button>
         </nav>
+        <input ref={traceFileInputRef} type="file" accept="image/*" hidden onChange={onTraceFilePicked}/>
         <div className="document-name">{dirty ? '● ' : ''}{path ? path.split(/[\\/]/).pop() : 'Untitled'}</div>
       </header>
 
@@ -1136,6 +1184,7 @@ function App() {
             <div className="field-grid"><Field label="X"><input type="number" value={selectedReference.x} onChange={event => updateReference({x: Number(event.target.value) || 0})}/></Field><Field label="Y"><input type="number" value={selectedReference.y} onChange={event => updateReference({y: Number(event.target.value) || 0})}/></Field></div>
             <div className="field-grid"><Field label="Width"><input type="number" min="10" value={selectedReference.width} onChange={event => updateReference({width: Math.max(10, Number(event.target.value) || 10)})}/></Field><Field label="Height"><input type="number" min="10" value={selectedReference.height} onChange={event => updateReference({height: Math.max(10, Number(event.target.value) || 10)})}/></Field></div>
             <div className="layer-actions"><button onClick={() => moveReferenceLayer('front')}>Bring to top</button><button onClick={() => moveReferenceLayer('back')}>Send to bottom</button></div>
+            <button className="primary-button trace-button" onClick={() => setTraceReferenceId(selectedReference.id)}>Generate grid from image</button>
             <button className="danger-button" onClick={deleteSelected}>Delete reference</button>
           </div> : primary ? <div className="inspector-body">
             <Field label="Category name"><input value={primary.category_name} onChange={event => updatePrimary('category_name', event.target.value)}/></Field>
@@ -1163,6 +1212,14 @@ function App() {
       </main>
 
       {dropActive && <div className="drop-overlay"><div><b>DROP FILES</b><span>JSON adds grids · images become temporary references</span></div></div>}
+
+      {traceReference && traceImageElement && <TraceModal
+        target={traceReference}
+        image={traceImageElement}
+        background={renderSettings.backgroundColor}
+        onClose={() => setTraceReferenceId(null)}
+        onInsert={insertTracedCategories}
+      />}
 
       {settingsOpen && <div className="modal-backdrop" onPointerDown={event => {if (event.target === event.currentTarget) setSettingsOpen(false)}}>
         <section className="settings-modal" role="dialog" aria-modal="true" aria-label="Application settings">

@@ -36,6 +36,7 @@ hero_grid_config.backup-*.json
 # Editors
 /.idea/
 /.vscode/
+.claude/
 *.swp
 *.swo
 
@@ -43,3 +44,4 @@ hero_grid_config.backup-*.json
 .DS_Store
 Thumbs.db
 Desktop.ini
+testdata/

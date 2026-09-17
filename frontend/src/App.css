@@ -203,3 +203,33 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--accent); ou
   .menu button { padding: 0 7px; }
   .document-name { display: none; }
 }
+
+.trace-button { width: 100%; height: 31px; margin-bottom: 9px; border-radius: 4px; font-size: 11px; }
+.trace-modal { width: min(1180px, calc(100vw - 40px)); height: min(840px, calc(100vh - 40px)); }
+.trace-body { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 292px; grid-template-rows: minmax(0, 1fr); }
+.trace-preview { position: relative; min-width: 0; min-height: 0; border-right: 1px solid var(--line); background: #0d0f13; }
+.trace-preview canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.trace-preview-overlay { position: absolute; inset: 0; display: grid; place-items: center; color: #8d939b; font-size: 11px; letter-spacing: .5px; background: rgba(13,15,19,.55); }
+.trace-controls { min-height: 0; overflow-y: auto; padding: 16px 18px 20px; }
+.trace-controls h3 { margin: 0 0 12px; color: #858b94; font-size: 10px; letter-spacing: 1.1px; text-transform: uppercase; }
+.trace-controls .field { margin-bottom: 14px; }
+.trace-controls .field > span { display: flex; justify-content: space-between; }
+.trace-controls .field > span b { color: #c9cdd0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.trace-controls .check-row { height: 27px; margin: 0 0 4px; }
+.trace-controls .keybindings-help { margin-top: 14px; line-height: 1.5; }
+.trace-count { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; padding: 10px 12px; border: 1px solid #2b3540; border-radius: 4px; background: #10151a; }
+.trace-count span { color: #52779b; font-size: 8px; font-weight: 700; letter-spacing: 1px; }
+.trace-count b { color: #e5f2ff; font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.trace-count small { color: #5f6670; font-size: 9px; line-height: 1.4; }
+.trace-count.warning { border-color: #5a3d2c; background: #1a1410; }
+.trace-count.warning small { color: #d49a6a; }
+.trace-divider { height: 1px; margin: 6px 0 14px; background: var(--line); }
+.trace-symbols { display: flex; flex-direction: column; gap: 3px; margin-bottom: 8px; }
+.trace-symbol-row { height: 28px; display: grid; grid-template-columns: 13px 22px minmax(0, 1fr) 38px; align-items: center; gap: 8px; }
+.trace-symbol-row input[type="checkbox"] { appearance: none; width: 13px; height: 13px; margin: 0; border: 1px solid #434952; border-radius: 2px; background: #0f1115; }
+.trace-symbol-row input[type="checkbox"]:checked { border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 2px #15171b; }
+.trace-symbol-glyph { text-align: center; color: #c9cdd0; font: 600 15px "DotaRadiance", Consolas, monospace; }
+.trace-symbol-row.off .trace-symbol-glyph { color: #4a5059; }
+.trace-symbol-row input[type="range"] { min-width: 0; height: 18px; margin: 0; accent-color: var(--accent); }
+.trace-symbol-row input[type="range"]:disabled { opacity: .3; }
+.trace-symbol-row b { color: #9aa0a8; font-size: 9px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
