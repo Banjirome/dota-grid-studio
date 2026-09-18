@@ -113,6 +113,14 @@ export function getCategoryIntrinsicSize(ctx: CanvasRenderingContext2D, label: s
   return {width: DOTA_LABEL_STYLE.paddingLeft + labelWidth, height: DOTA_LABEL_STYLE.controlHeight}
 }
 
+/** Bounds of the visible label itself, excluding the category's often much larger layout box. */
+export function getCategoryTextBounds(ctx: CanvasRenderingContext2D, category: DotaCategory) {
+  const intrinsic = getCategoryIntrinsicSize(ctx, renderedLabel(category))
+  const minX = category.x_position + DOTA_LABEL_STYLE.paddingLeft
+  const minY = category.y_position + (DOTA_LABEL_STYLE.controlHeight - DOTA_LABEL_STYLE.size) / 2
+  return {minX, minY, maxX: category.x_position + intrinsic.width, maxY: minY + DOTA_LABEL_STYLE.size}
+}
+
 export function getCategoryLayoutBounds(ctx: CanvasRenderingContext2D, category: DotaCategory) {
   const intrinsic = getCategoryIntrinsicSize(ctx, renderedLabel(category))
   const textLeft = category.x_position + DOTA_LABEL_STYLE.paddingLeft

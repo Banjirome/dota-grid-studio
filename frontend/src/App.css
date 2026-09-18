@@ -31,6 +31,7 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--accent); ou
 .right-panel { border-left: 1px solid var(--line); overflow-y: auto; }
 .panel-section { border-bottom: 1px solid var(--line); }
 .configs-section { max-height: 35%; overflow: auto; }
+.references-section { max-height: 24%; overflow-y: auto; padding-bottom: 9px; }
 .recent-section { max-height: 156px; overflow: hidden; }
 .recent-list { padding: 0 7px 8px; }
 .recent-list button { width: 100%; height: 34px; display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 0 8px; border-radius: 4px; text-align: left; }
@@ -107,6 +108,9 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--accent); ou
 .reference-list button.active { border-color: #4f9dec; color: #e5f2ff; background: rgba(79,157,236,.09); }
 .reference-list button span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .reference-list button small { color: #52779b; font-size: 7px; }
+.reference-lock-button { width: 100%; height: 32px; margin: 10px 0 12px; border: 1px solid #36404b; border-radius: 3px; color: #949ba3; background: #11161b; font-size: 10px; font-weight: 700; letter-spacing: .45px; }
+.reference-lock-button:hover { border-color: #4f9dec; color: #dcecff; }
+.reference-lock-button.active { border-color: #4f9dec; color: #a9d2fb; background: rgba(79,157,236,.12); }
 .symbol-palette { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; padding: 0 12px; }
 .symbol-palette button { position: relative; height: 34px; border: 1px solid #292e35; border-radius: 3px; background: #101217; color: #a5a9ac; font: 12px Consolas, monospace; }
 .symbol-palette button span { display: block; overflow: hidden; padding: 0 3px; white-space: nowrap; text-overflow: ellipsis; }

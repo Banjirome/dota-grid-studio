@@ -18,6 +18,8 @@ import {
   DOTA_LABEL_STYLE,
   defaultRenderSettings,
   drawCategoryLabel,
+  getCategoryIntrinsicSize,
+  getCategoryTextBounds,
   getCategoryVisualBounds,
 } from './rendering'
 import {
@@ -57,6 +59,8 @@ type ReferenceImage = {
   width: number
   height: number
   layer: 'back' | 'front'
+  locked: boolean
+  opacity: number
 }
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
@@ -207,14 +211,27 @@ function App() {
   const hitTest = useCallback((point: {x: number; y: number}) => {
     const dota = screenToDotaPoint(point)
     const measureContext = window.document.createElement('canvas').getContext('2d')!
-    for (let index = categories.length - 1; index >= 0; index--) {
+    const toleranceX = 6 / Math.max(.001, view.zoom * Math.abs(calibration.scaleX))
+    const toleranceY = 6 / Math.max(.001, view.zoom * Math.abs(calibration.scaleY))
+    let closest = -1
+    let closestScore = Number.POSITIVE_INFINITY
+    for (let index = 0; index < categories.length; index++) {
       if (hidden.has(index)) continue
       const item = categories[index]
-      const bounds = getCategoryVisualBounds(measureContext, item, renderSettings)
-      if (dota.x >= bounds.minX && dota.x <= bounds.maxX && dota.y >= bounds.minY && dota.y <= bounds.maxY) return index
+      const bounds = getCategoryTextBounds(measureContext, item)
+      if (dota.x < bounds.minX - toleranceX || dota.x > bounds.maxX + toleranceX || dota.y < bounds.minY - toleranceY || dota.y > bounds.maxY + toleranceY) continue
+      const centreX = (bounds.minX + bounds.maxX) / 2
+      const centreY = (bounds.minY + bounds.maxY) / 2
+      const dx = (dota.x - centreX) * calibration.scaleX * view.zoom
+      const dy = (dota.y - centreY) * calibration.scaleY * view.zoom
+      const outsideX = Math.max(bounds.minX - dota.x, 0, dota.x - bounds.maxX) * Math.abs(calibration.scaleX) * view.zoom
+      const outsideY = Math.max(bounds.minY - dota.y, 0, dota.y - bounds.maxY) * Math.abs(calibration.scaleY) * view.zoom
+      // Prefer actual ink proximity, then the nearest label centre when ink boxes overlap.
+      const score = (outsideX * outsideX + outsideY * outsideY) * 100 + dx * dx + dy * dy
+      if (score < closestScore) { closestScore = score; closest = index }
     }
-    return -1
-  }, [categories, hidden, renderSettings, screenToDotaPoint])
+    return closest
+  }, [calibration, categories, hidden, screenToDotaPoint, view.zoom])
 
   const fitToContent = useCallback(() => {
     const canvas = canvasRef.current
@@ -341,12 +358,12 @@ function App() {
     const resolvedReference = (item: ReferenceImage) => item.id === selectedReferenceId && imagePreviewRef.current ? {...item, ...imagePreviewRef.current} : item
     const drawReferenceLayer = (layer: ReferenceImage['layer']) => {
       ctx.save()
-      ctx.globalAlpha = .62
       referenceImages.forEach(source => {
         const item = resolvedReference(source)
         if (item.layer !== layer) return
         const image = referenceElementsRef.current.get(item.id)
         if (!image) return
+        ctx.globalAlpha = Math.max(0, Math.min(1, item.opacity ?? .62))
         const p = dotaToCanvas(item.x, item.y, calibration)
         ctx.drawImage(image, view.x + p.x * view.zoom, view.y + p.y * view.zoom, item.width * calibration.scaleX * view.zoom, item.height * calibration.scaleY * view.zoom)
       })
@@ -424,8 +441,10 @@ function App() {
       ctx.fillRect(x, y, widthPx, heightPx)
       ctx.strokeStyle = '#4f9dec'; ctx.lineWidth = 1.5
       ctx.strokeRect(x + .75, y + .75, widthPx - 1.5, heightPx - 1.5)
-      ctx.fillStyle = '#4f9dec'
-      ctx.fillRect(x + widthPx - 4, y + heightPx - 4, 8, 8)
+      if (!item.locked) {
+        ctx.fillStyle = '#4f9dec'
+        ctx.fillRect(x + widthPx - 4, y + heightPx - 4, 8, 8)
+      }
     }
 
     const marquee = marqueeRef.current
@@ -481,6 +500,7 @@ function App() {
     for (let index = referenceImages.length - 1; index >= 0; index--) {
       const item = referenceImages[index]
       if (item.layer !== layer) continue
+      if (item.locked) continue
       if (dota.x >= item.x && dota.x <= item.x + item.width && dota.y >= item.y && dota.y <= item.y + item.height) return item
     }
     return undefined
@@ -498,10 +518,35 @@ function App() {
       return
     }
     if (event.button !== 0) return
+
+    // Placement mode is deliberately write-only: existing elements and references must never
+    // steal the click when drawing dense rows of dots or other symbols.
+    if (tool === 'symbol') {
+      if (!symbol) { setStatus('Add or select a palette item first'); return }
+      const p = screenToDotaPoint(point)
+      const measureContext = window.document.createElement('canvas').getContext('2d')!
+      const intrinsic = getCategoryIntrinsicSize(measureContext, symbol)
+      // The Dota label is offset inside its category box. Position the visible glyph centre under
+      // the pointer rather than centring the unrelated 30×30 category rectangle.
+      const visualCentreOffsetX = (DOTA_LABEL_STYLE.paddingLeft + intrinsic.width) / 2
+      const visualCentreOffsetY = DOTA_LABEL_STYLE.controlHeight / 2
+      const item: DotaCategory = {
+        category_name: symbol,
+        x_position: formatNumber(p.x - visualCentreOffsetX),
+        y_position: formatNumber(p.y - visualCentreOffsetY),
+        width: 30,
+        height: 30,
+        hero_ids: [],
+      }
+      const newIndex = categories.length
+      commit(current => ({...current, configs: current.configs.map((cfg, ci) => ci === configIndex ? {...cfg, categories: [...cfg.categories, item]} : cfg)}))
+      setSelectedReferenceId(null); setSelected([newIndex]); setStatus(`Created “${item.category_name}”`)
+      return
+    }
     let hit = -1
     let resize = false
 
-    if (tool === 'select' && selectedReference) {
+    if (tool === 'select' && selectedReference && !selectedReference.locked) {
       const handle = dotaToCanvas(selectedReference.x + selectedReference.width, selectedReference.y + selectedReference.height, calibration)
       const handleX = view.x + handle.x * view.zoom
       const handleY = view.y + handle.y * view.zoom
@@ -523,7 +568,7 @@ function App() {
       const frontReference = hitReference(point, 'front')
       if (frontReference) {
         setSelected([]); setSelectedReferenceId(frontReference.id)
-        pointerRef.current = {mode: 'image-drag', startScreen: point, startView: view, originals: new Map(), imageId: frontReference.id, imageOriginal: clone(frontReference)}
+        if (!frontReference.locked) pointerRef.current = {mode: 'image-drag', startScreen: point, startView: view, originals: new Map(), imageId: frontReference.id, imageOriginal: clone(frontReference)}
         return
       }
     }
@@ -532,19 +577,9 @@ function App() {
       const backReference = hitReference(point, 'back')
       if (backReference) {
         setSelected([]); setSelectedReferenceId(backReference.id)
-        pointerRef.current = {mode: 'image-drag', startScreen: point, startView: view, originals: new Map(), imageId: backReference.id, imageOriginal: clone(backReference)}
+        if (!backReference.locked) pointerRef.current = {mode: 'image-drag', startScreen: point, startView: view, originals: new Map(), imageId: backReference.id, imageOriginal: clone(backReference)}
         return
       }
-    }
-    if (tool === 'symbol' && hit < 0) {
-      if (!symbol) { setStatus('Add or select a palette item first'); return }
-      const p = screenToDotaPoint(point)
-      const label = symbol
-      const item: DotaCategory = {category_name: label, x_position: p.x - 15, y_position: p.y - 15, width: 30, height: 30, hero_ids: []}
-      const newIndex = categories.length
-      commit(current => ({...current, configs: current.configs.map((cfg, ci) => ci === configIndex ? {...cfg, categories: [...cfg.categories, item]} : cfg)}))
-      setSelectedReferenceId(null); setSelected([newIndex]); setStatus(`Created “${item.category_name}”`)
-      return
     }
     if (hit < 0) {
       if (tool === 'select') {
@@ -686,7 +721,7 @@ function App() {
 
   const moveSelected = useCallback((dx: number, dy: number) => {
     if (selectedReferenceId) {
-      setReferenceImages(current => current.map(item => item.id === selectedReferenceId ? {...item, x: item.x + dx, y: item.y + dy} : item))
+      setReferenceImages(current => current.map(item => item.id === selectedReferenceId && !item.locked ? {...item, x: item.x + dx, y: item.y + dy} : item))
       return
     }
     const changes = new Map<number, Partial<DotaCategory>>()
@@ -814,7 +849,7 @@ function App() {
     const reference: ReferenceImage = {
       id, name, src,
       x: dota.x - width / 2 + offset, y: dota.y - height / 2 + offset,
-      width: formatNumber(width), height: formatNumber(height), layer: 'back',
+      width: formatNumber(width), height: formatNumber(height), layer: 'back', locked: false, opacity: .62,
     }
     referenceElementsRef.current.set(id, image)
     setReferenceImages(current => [...current, reference])
@@ -1152,6 +1187,10 @@ function App() {
               {document.configs.map((item, index) => <button key={index} className={`config-item ${index === configIndex ? 'active' : ''}`} onClick={() => {setConfigIndex(index); setSelected([]); setSelectedReferenceId(null); setHidden(new Set()); setLocked(new Set())}}><span className="config-dot"/>{item.config_name}<small>{item.categories.length}</small></button>)}
             </div>
           </section>
+          {referenceImages.length > 0 && <section className="panel-section references-section">
+            <div className="section-heading"><span>REFERENCE IMAGES</span><span className="count">{referenceImages.length}</span></div>
+            <div className="reference-list">{referenceImages.map(item => <button key={item.id} className={item.id === selectedReferenceId ? 'active' : ''} onClick={() => {setSelected([]); setSelectedReferenceId(item.id); setTool('select')}}><span title={item.name}>{item.name}</span><small>{item.locked ? 'LOCKED' : item.layer === 'front' ? 'TOP' : 'BOTTOM'}</small></button>)}</div>
+          </section>}
           <section className="panel-section elements-section">
             <div className="section-heading"><span>ELEMENTS</span><span className="count">{categories.length}</span></div>
             <div className="search-wrap"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search symbols"/></div>
@@ -1181,8 +1220,10 @@ function App() {
           <section className="inspector-header"><span>INSPECTOR</span>{selected.length > 1 && <small>{selected.length} selected</small>}</section>
           {selectedReference ? <div className="inspector-body">
             <div className="reference-name"><span>REFERENCE IMAGE</span><b title={selectedReference.name}>{selectedReference.name}</b></div>
-            <div className="field-grid"><Field label="X"><input type="number" value={selectedReference.x} onChange={event => updateReference({x: Number(event.target.value) || 0})}/></Field><Field label="Y"><input type="number" value={selectedReference.y} onChange={event => updateReference({y: Number(event.target.value) || 0})}/></Field></div>
-            <div className="field-grid"><Field label="Width"><input type="number" min="10" value={selectedReference.width} onChange={event => updateReference({width: Math.max(10, Number(event.target.value) || 10)})}/></Field><Field label="Height"><input type="number" min="10" value={selectedReference.height} onChange={event => updateReference({height: Math.max(10, Number(event.target.value) || 10)})}/></Field></div>
+            <button className={`reference-lock-button ${selectedReference.locked ? 'active' : ''}`} onClick={() => {updateReference({locked: !selectedReference.locked}); setStatus(selectedReference.locked ? 'Reference unlocked' : 'Reference locked')}}>{selectedReference.locked ? '◆ Position locked' : '◇ Lock position'}</button>
+            <Field label={`Opacity ${Math.round((selectedReference.opacity ?? .62) * 100)}%`}><input type="range" min="5" max="100" value={Math.round((selectedReference.opacity ?? .62) * 100)} onChange={event => updateReference({opacity: Number(event.target.value) / 100})}/></Field>
+            <div className="field-grid"><Field label="X"><input disabled={selectedReference.locked} type="number" value={selectedReference.x} onChange={event => updateReference({x: Number(event.target.value) || 0})}/></Field><Field label="Y"><input disabled={selectedReference.locked} type="number" value={selectedReference.y} onChange={event => updateReference({y: Number(event.target.value) || 0})}/></Field></div>
+            <div className="field-grid"><Field label="Width"><input disabled={selectedReference.locked} type="number" min="10" value={selectedReference.width} onChange={event => updateReference({width: Math.max(10, Number(event.target.value) || 10)})}/></Field><Field label="Height"><input disabled={selectedReference.locked} type="number" min="10" value={selectedReference.height} onChange={event => updateReference({height: Math.max(10, Number(event.target.value) || 10)})}/></Field></div>
             <div className="layer-actions"><button onClick={() => moveReferenceLayer('front')}>Bring to top</button><button onClick={() => moveReferenceLayer('back')}>Send to bottom</button></div>
             <button className="primary-button trace-button" onClick={() => setTraceReferenceId(selectedReference.id)}>Generate grid from image</button>
             <button className="danger-button" onClick={deleteSelected}>Delete reference</button>
@@ -1193,11 +1234,6 @@ function App() {
             <Field label="Hero IDs"><input value={primary.hero_ids.join(', ')} placeholder="e.g. 1, 2, 3" onChange={event => updatePrimary('hero_ids', event.target.value)}/></Field>
             <button className="danger-button" onClick={deleteSelected}>Delete selection</button>
           </div> : <div className="no-selection"><div className="selection-icon">⌁</div><b>Nothing selected</b><span>Click an element on the canvas<br/>to inspect its properties.</span></div>}
-
-          {referenceImages.length > 0 && <section className="properties-section reference-section">
-            <div className="section-heading"><span>REFERENCE IMAGES</span><span className="count">{referenceImages.length}</span></div>
-            <div className="reference-list">{referenceImages.map(item => <button key={item.id} className={item.id === selectedReferenceId ? 'active' : ''} onClick={() => {setSelected([]); setSelectedReferenceId(item.id); setTool('select')}}><span title={item.name}>{item.name}</span><small>{item.layer === 'front' ? 'TOP' : 'BOTTOM'}</small></button>)}</div>
-          </section>}
 
           <section className="properties-section">
             <div className="section-heading"><span>SYMBOL PALETTE</span></div>
