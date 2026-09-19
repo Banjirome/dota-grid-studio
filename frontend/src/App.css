@@ -237,3 +237,15 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--accent); ou
 .trace-symbol-row input[type="range"] { min-width: 0; height: 18px; margin: 0; accent-color: var(--accent); }
 .trace-symbol-row input[type="range"]:disabled { opacity: .3; }
 .trace-symbol-row b { color: #9aa0a8; font-size: 9px; font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+.frame-modal { width: min(1080px, calc(100vw - 48px)); height: min(760px, calc(100vh - 54px)); }
+.frame-body { min-height: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr) 310px; }
+.frame-preview { min-width: 0; min-height: 0; padding: 18px; background: #0c0e11; }
+.frame-preview canvas { width: 100%; height: 100%; display: block; border: 1px solid #292e35; border-radius: 5px; }
+.frame-controls { min-height: 0; overflow-y: auto; padding: 14px; border-left: 1px solid var(--line); }
+.frame-template-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 16px; }
+.frame-template-grid button { min-width: 0; height: 42px; display: grid; grid-template-columns: 22px minmax(0,1fr); align-items: center; gap: 5px; padding: 0 7px; border: 1px solid #2d3239; border-radius: 4px; color: #828892; background: #101318; text-align: left; }
+.frame-template-grid button:hover { border-color: #4b5663; color: #dce1e5; }
+.frame-template-grid button.active { border-color: var(--accent); color: #fff; background: var(--accent-soft); }
+.frame-template-grid b { color: #59616b; font-size: 9px; }
+.frame-template-grid span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 9px; }
+.randomise-frame { width: 100%; margin-bottom: 13px; }

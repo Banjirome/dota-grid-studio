@@ -1,6 +1,7 @@
 import {ChangeEvent, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent, WheelEvent, useCallback, useEffect, useMemo, useRef, useState} from 'react'
 import './App.css'
 import TraceModal from './TraceModal'
+import {FRAME_STYLES, ProceduralFrame, frameCategories} from './frames'
 import {FilePayload, exportPNG, getLaunchOptions, hasNativeBackend, loadAppSettings, openDotaJSON, readDotaJSON, readReferenceImage, saveAppSettings, saveDotaJSON} from './backend'
 import {OnFileDrop, OnFileDropOff} from '../wailsjs/runtime/runtime'
 import {
@@ -40,12 +41,14 @@ type Tool = 'select' | 'symbol' | 'pan'
 type View = {x: number; y: number; zoom: number}
 type SelectionBounds = {index: number; minX: number; minY: number; maxX: number; maxY: number}
 type PointerAction = {
-  mode: 'pan' | 'drag' | 'resize' | 'image-drag' | 'image-resize' | 'marquee'
+  mode: 'pan' | 'drag' | 'resize' | 'image-drag' | 'image-resize' | 'frame-drag' | 'frame-resize' | 'marquee'
   startScreen: {x: number; y: number}
   startView: View
   originals: Map<number, DotaCategory>
   imageId?: string
   imageOriginal?: ReferenceImage
+  frameId?: string
+  frameOriginal?: ProceduralFrame
   baseSelection?: number[]
   marqueeBounds?: SelectionBounds[]
 }
@@ -96,6 +99,8 @@ function App() {
   const [selectedReferenceId, setSelectedReferenceId] = useState<string | null>(null)
   const [dropActive, setDropActive] = useState(false)
   const [traceReferenceId, setTraceReferenceId] = useState<string | null>(null)
+  const [frames, setFrames] = useState<ProceduralFrame[]>([])
+  const [selectedFrameId, setSelectedFrameId] = useState<string | null>(null)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const traceFileInputRef = useRef<HTMLInputElement>(null)
@@ -108,6 +113,7 @@ function App() {
   const initialisedRef = useRef(false)
   const dragPreviewRef = useRef<Map<number, Partial<DotaCategory>>>(new Map())
   const imagePreviewRef = useRef<Partial<ReferenceImage> | null>(null)
+  const framePreviewRef = useRef<Partial<ProceduralFrame> | null>(null)
   const marqueeRef = useRef<{start: {x: number; y: number}; current: {x: number; y: number}} | null>(null)
   const selectionPreviewRef = useRef<number[] | null>(null)
   const referenceElementsRef = useRef<Map<string, HTMLImageElement>>(new Map())
@@ -121,6 +127,7 @@ function App() {
   const primaryIndex = selected.length ? selected[selected.length - 1] : -1
   const primary = categories[primaryIndex]
   const selectedReference = referenceImages.find(item => item.id === selectedReferenceId)
+  const selectedFrame = frames.find(item => item.id === selectedFrameId)
   const traceReference = referenceImages.find(item => item.id === traceReferenceId)
   const traceImageElement = traceReferenceId ? referenceElementsRef.current.get(traceReferenceId) : undefined
   const commandLabels = useMemo(() => commandLabelsForPalette(palette), [palette])
@@ -356,6 +363,7 @@ function App() {
     const activePrimaryIndex = activeSelection.length ? activeSelection[activeSelection.length - 1] : -1
 
     const resolvedReference = (item: ReferenceImage) => item.id === selectedReferenceId && imagePreviewRef.current ? {...item, ...imagePreviewRef.current} : item
+    const resolvedFrame = (item: ProceduralFrame) => item.id === selectedFrameId && framePreviewRef.current ? {...item, ...framePreviewRef.current} : item
     const drawReferenceLayer = (layer: ReferenceImage['layer']) => {
       ctx.save()
       referenceImages.forEach(source => {
@@ -391,6 +399,18 @@ function App() {
     ctx.moveTo(view.x + origin.x * view.zoom + .5, 0); ctx.lineTo(view.x + origin.x * view.zoom + .5, rect.height)
     ctx.moveTo(0, view.y + origin.y * view.zoom + .5); ctx.lineTo(rect.width, view.y + origin.y * view.zoom + .5)
     ctx.stroke()
+
+    frames.forEach(source => {
+      const frame = resolvedFrame(source)
+      frameCategories(frame).forEach(item => {
+        const p = dotaToCanvas(item.x_position, item.y_position, calibration)
+        drawCategoryLabel(ctx, item, {x:view.x+p.x*view.zoom,y:view.y+p.y*view.zoom,width:item.width*calibration.scaleX*view.zoom,height:item.height*calibration.scaleY*view.zoom}, renderSettings)
+      })
+      if(frame.id===selectedFrameId){
+        const p=dotaToCanvas(frame.x,frame.y,calibration),x=view.x+p.x*view.zoom,y=view.y+p.y*view.zoom,w=frame.width*calibration.scaleX*view.zoom,h=frame.height*calibration.scaleY*view.zoom
+        ctx.save();ctx.strokeStyle='#f05a4f';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);ctx.strokeRect(x+.75,y+.75,w-1.5,h-1.5);ctx.setLineDash([]);ctx.fillStyle='#f05a4f';ctx.fillRect(x+w-5,y+h-5,10,10);ctx.restore()
+      }
+    })
 
     categories.forEach((source, index) => {
       if (hidden.has(index)) return
@@ -462,7 +482,7 @@ function App() {
       ctx.strokeRect(x + .5, y + .5, Math.max(0, width - 1), Math.max(0, height - 1))
       ctx.restore()
     }
-  }, [calibration, categories, hidden, locked, primaryIndex, referenceImages, renderSettings, selected, selectedReference, selectedReferenceId, showGrid, view])
+  }, [calibration, categories, frames, hidden, locked, primaryIndex, referenceImages, renderSettings, selected, selectedFrameId, selectedReference, selectedReferenceId, showGrid, view])
 
   const scheduleDraw = useCallback(() => {
     if (drawFrameRef.current !== null) return
@@ -506,10 +526,24 @@ function App() {
     return undefined
   }, [referenceImages, screenToDotaPoint])
 
+  const hitFrame = useCallback((point:{x:number;y:number})=>{
+    const p=screenToDotaPoint(point)
+    for(let i=frames.length-1;i>=0;i--){const f=frames[i]
+      if(p.x>=f.x&&p.x<=f.x+f.width&&p.y>=f.y&&p.y<=f.y+f.height)return f
+    } return undefined
+  },[frames,screenToDotaPoint])
+
+  const addFrame=()=>{
+    const centre=screenToDotaPoint(canvasCenterPoint()), id=`frame-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const frame:ProceduralFrame={id,name:`Frame ${frames.length+1}`,x:centre.x-260,y:centre.y-210,width:520,height:420,style:'filigree',seed:Math.floor(Math.random()*99999),density:7,depth:3,symmetry:true}
+    setFrames(current=>[...current,frame]);setSelected([]);setSelectedReferenceId(null);setSelectedFrameId(id);setTool('select');setStatus('Frame created — resize it on canvas or edit it in Inspector')
+  }
+
   const onPointerDown = (event: ReactPointerEvent<HTMLCanvasElement>) => {
     const point = screenPoint(event)
     dragPreviewRef.current.clear()
     imagePreviewRef.current = null
+    framePreviewRef.current = null
     marqueeRef.current = null
     selectionPreviewRef.current = null
     canvasRef.current?.setPointerCapture(event.pointerId)
@@ -546,6 +580,15 @@ function App() {
     let hit = -1
     let resize = false
 
+    if(tool==='select'&&selectedFrame){
+      const h=dotaToCanvas(selectedFrame.x+selectedFrame.width,selectedFrame.y+selectedFrame.height,calibration),hx=view.x+h.x*view.zoom,hy=view.y+h.y*view.zoom
+      if(Math.abs(point.x-hx)<=12&&Math.abs(point.y-hy)<=12){pointerRef.current={mode:'frame-resize',startScreen:point,startView:view,originals:new Map(),frameId:selectedFrame.id,frameOriginal:clone(selectedFrame)};return}
+    }
+    if(tool==='select'){
+      const frame=hitFrame(point)
+      if(frame){setSelected([]);setSelectedReferenceId(null);setSelectedFrameId(frame.id);pointerRef.current={mode:'frame-drag',startScreen:point,startView:view,originals:new Map(),frameId:frame.id,frameOriginal:clone(frame)};return}
+    }
+
     if (tool === 'select' && selectedReference && !selectedReference.locked) {
       const handle = dotaToCanvas(selectedReference.x + selectedReference.width, selectedReference.y + selectedReference.height, calibration)
       const handleX = view.x + handle.x * view.zoom
@@ -567,7 +610,7 @@ function App() {
     if (tool === 'select' && !resize) {
       const frontReference = hitReference(point, 'front')
       if (frontReference) {
-        setSelected([]); setSelectedReferenceId(frontReference.id)
+        setSelected([]); setSelectedFrameId(null); setSelectedReferenceId(frontReference.id)
         if (!frontReference.locked) pointerRef.current = {mode: 'image-drag', startScreen: point, startView: view, originals: new Map(), imageId: frontReference.id, imageOriginal: clone(frontReference)}
         return
       }
@@ -576,7 +619,7 @@ function App() {
     if (tool === 'select' && hit < 0) {
       const backReference = hitReference(point, 'back')
       if (backReference) {
-        setSelected([]); setSelectedReferenceId(backReference.id)
+        setSelected([]); setSelectedFrameId(null); setSelectedReferenceId(backReference.id)
         if (!backReference.locked) pointerRef.current = {mode: 'image-drag', startScreen: point, startView: view, originals: new Map(), imageId: backReference.id, imageOriginal: clone(backReference)}
         return
       }
@@ -592,19 +635,19 @@ function App() {
         })
         selectedRef.current = baseSelection
         setSelected(baseSelection)
-        setSelectedReferenceId(null)
+        setSelectedReferenceId(null); setSelectedFrameId(null)
         marqueeRef.current = {start: point, current: point}
         selectionPreviewRef.current = baseSelection
         pointerRef.current = {mode: 'marquee', startScreen: point, startView: view, originals: new Map(), baseSelection, marqueeBounds}
         scheduleDraw()
         return
       }
-      setSelected([]); setSelectedReferenceId(null); return
+      setSelected([]); setSelectedReferenceId(null); setSelectedFrameId(null); return
     }
     const currentSelection = resize ? [hit] : event.ctrlKey || event.shiftKey
       ? (selected.includes(hit) ? selected.filter(index => index !== hit) : [...selected, hit])
       : (selected.includes(hit) ? selected : [hit])
-    setSelectedReferenceId(null); setSelected(currentSelection)
+    setSelectedReferenceId(null); setSelectedFrameId(null); setSelected(currentSelection)
     if (locked.has(hit)) return
     const originals = new Map<number, DotaCategory>()
     currentSelection.forEach(index => {
@@ -642,6 +685,9 @@ function App() {
     }
     const deltaX = (point.x - action.startScreen.x) / action.startView.zoom / calibration.scaleX
     const deltaY = (point.y - action.startScreen.y) / action.startView.zoom / calibration.scaleY
+    if((action.mode==='frame-drag'||action.mode==='frame-resize')&&action.frameOriginal){
+      framePreviewRef.current=action.mode==='frame-resize'?{width:Math.max(80,action.frameOriginal.width+deltaX),height:Math.max(80,action.frameOriginal.height+deltaY)}:{x:action.frameOriginal.x+deltaX,y:action.frameOriginal.y+deltaY};scheduleDraw();return
+    }
     if ((action.mode === 'image-drag' || action.mode === 'image-resize') && action.imageOriginal) {
       imagePreviewRef.current = action.mode === 'image-resize'
         ? {width: Math.max(10, action.imageOriginal.width + deltaX), height: Math.max(10, action.imageOriginal.height + deltaY)}
@@ -662,10 +708,12 @@ function App() {
     const action = pointerRef.current
     const changes = dragPreviewRef.current
     const imageChanges = imagePreviewRef.current
+    const frameChanges = framePreviewRef.current
     const selectionPreview = selectionPreviewRef.current
     pointerRef.current = null
     dragPreviewRef.current = new Map()
     imagePreviewRef.current = null
+    framePreviewRef.current = null
     marqueeRef.current = null
     selectionPreviewRef.current = null
     if (action?.mode === 'marquee') {
@@ -682,7 +730,8 @@ function App() {
       scheduleDraw()
       return
     }
-    if (commitPreview && action?.imageId && imageChanges) {
+    if(commitPreview&&action?.frameId&&frameChanges){setFrames(current=>current.map(item=>item.id===action.frameId?{...item,...frameChanges}:item))
+    } else if (commitPreview && action?.imageId && imageChanges) {
       setReferenceImages(current => current.map(item => item.id === action.imageId ? {...item, ...imageChanges} : item))
     } else if (commitPreview && action && action.mode !== 'pan' && changes.size) changeCategories(changes)
     else scheduleDraw()
@@ -700,6 +749,7 @@ function App() {
   }, [])
 
   const deleteSelected = useCallback(() => {
+    if(selectedFrameId){setFrames(current=>current.filter(item=>item.id!==selectedFrameId));setSelectedFrameId(null);setStatus('Deleted procedural frame');return}
     if (selectedReferenceId) {
       removeReference(selectedReferenceId)
       setStatus('Deleted reference image')
@@ -709,7 +759,7 @@ function App() {
     if (!chosen.size) return
     commit(current => ({...current, configs: current.configs.map((cfg, ci) => ci === configIndex ? {...cfg, categories: cfg.categories.filter((_, index) => !chosen.has(index))} : cfg)}))
     setSelected([]); setHidden(new Set()); setLocked(new Set()); setStatus(`Deleted ${chosen.size} element${chosen.size === 1 ? '' : 's'}`)
-  }, [commit, configIndex, removeReference, selectedReferenceId])
+  }, [commit, configIndex, removeReference, selectedFrameId, selectedReferenceId])
 
   const duplicateSelected = useCallback(() => {
     const items = selectedRef.current.map(index => documentRef.current.configs[configIndex]?.categories[index]).filter(Boolean).map(item => ({...clone(item), x_position: item.x_position + 10, y_position: item.y_position + 10}))
@@ -720,6 +770,7 @@ function App() {
   }, [commit, configIndex])
 
   const moveSelected = useCallback((dx: number, dy: number) => {
+    if(selectedFrameId){setFrames(current=>current.map(item=>item.id===selectedFrameId?{...item,x:item.x+dx,y:item.y+dy}:item));return}
     if (selectedReferenceId) {
       setReferenceImages(current => current.map(item => item.id === selectedReferenceId && !item.locked ? {...item, x: item.x + dx, y: item.y + dy} : item))
       return
@@ -731,7 +782,7 @@ function App() {
       if (item) changes.set(index, {x_position: item.x_position + dx, y_position: item.y_position + dy})
     })
     if (changes.size) changeCategories(changes)
-  }, [changeCategories, configIndex, locked, selectedReferenceId])
+  }, [changeCategories, configIndex, locked, selectedFrameId, selectedReferenceId])
 
   const pasteCopiedCategories = useCallback(() => {
     const source = clipboardRef.current
@@ -1012,6 +1063,14 @@ function App() {
     setReferenceImages(current => current.map(item => item.id === selectedReferenceId ? {...item, ...change} : item))
   }
 
+  const updateFrame=(change:Partial<ProceduralFrame>)=>{if(selectedFrameId)setFrames(current=>current.map(item=>item.id===selectedFrameId?{...item,...change}:item))}
+  const convertFrame=()=>{
+    if(!selectedFrame)return;const items=frameCategories(selectedFrame),start=categories.length
+    commit(current=>({...current,configs:current.configs.map((cfg,ci)=>ci===configIndex?{...cfg,categories:[...cfg.categories,...items]}:cfg)}))
+    setFrames(current=>current.filter(item=>item.id!==selectedFrame.id));setSelectedFrameId(null);setSelected(items.map((_,i)=>start+i));setStatus(`Frame converted to ${items.length} editable symbols`)
+  }
+  const deleteFrame=()=>{if(selectedFrameId){setFrames(current=>current.filter(item=>item.id!==selectedFrameId));setSelectedFrameId(null);setStatus('Frame deleted')}}
+
   const moveReferenceLayer = (layer: ReferenceImage['layer']) => {
     if (!selectedReferenceId) return
     setReferenceImages(current => {
@@ -1191,6 +1250,7 @@ function App() {
             <div className="section-heading"><span>REFERENCE IMAGES</span><span className="count">{referenceImages.length}</span></div>
             <div className="reference-list">{referenceImages.map(item => <button key={item.id} className={item.id === selectedReferenceId ? 'active' : ''} onClick={() => {setSelected([]); setSelectedReferenceId(item.id); setTool('select')}}><span title={item.name}>{item.name}</span><small>{item.locked ? 'LOCKED' : item.layer === 'front' ? 'TOP' : 'BOTTOM'}</small></button>)}</div>
           </section>}
+          {frames.length>0&&<section className="panel-section references-section"><div className="section-heading"><span>PROCEDURAL FRAMES</span><span className="count">{frames.length}</span></div><div className="reference-list">{frames.map(item=><button key={item.id} className={item.id===selectedFrameId?'active':''} onClick={()=>{setSelected([]);setSelectedReferenceId(null);setSelectedFrameId(item.id);setTool('select')}}><span>{item.name}</span><small>{FRAME_STYLES.find(style=>style.id===item.style)?.name}</small></button>)}</div></section>}
           <section className="panel-section elements-section">
             <div className="section-heading"><span>ELEMENTS</span><span className="count">{categories.length}</span></div>
             <div className="search-wrap"><span>⌕</span><input value={search} onChange={event => setSearch(event.target.value)} placeholder="Search symbols"/></div>
@@ -1210,7 +1270,7 @@ function App() {
             <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Select (V)">↖</button>
             <button className={tool === 'symbol' ? 'active' : ''} onClick={() => setTool('symbol')} title="Symbol tool">T</button>
             <button className={tool === 'pan' ? 'active' : ''} onClick={() => setTool('pan')} title="Pan (Space)">✥</button>
-            <span className="toolbar-divider"/><button onClick={fitToContent} title="Fit to content">⌗</button>
+            <span className="toolbar-divider"/><button onClick={addFrame} title="Add procedural frame">▣</button><button onClick={fitToContent} title="Fit to content">⌗</button>
           </div>
           <canvas ref={canvasRef} className={`canvas tool-${tool} ${spaceDown ? 'is-panning' : ''}`} onContextMenu={event => event.preventDefault()} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => finishPointerAction(true)} onPointerCancel={() => finishPointerAction(false)}/>
           <div className="canvas-hint">Drag empty space to select · Wheel to zoom · Middle mouse / Space to pan</div>
@@ -1218,7 +1278,17 @@ function App() {
 
         <aside className="right-panel panel">
           <section className="inspector-header"><span>INSPECTOR</span>{selected.length > 1 && <small>{selected.length} selected</small>}</section>
-          {selectedReference ? <div className="inspector-body">
+          {selectedFrame ? <div className="inspector-body frame-inspector">
+            <div className="reference-name"><span>PROCEDURAL FRAME</span><b>{selectedFrame.name}</b></div>
+            <Field label="Template"><select value={selectedFrame.style} onChange={event=>updateFrame({style:event.target.value as ProceduralFrame['style']})}>{FRAME_STYLES.map(style=><option key={style.id} value={style.id}>{style.name}</option>)}</select></Field>
+            <div className="field-grid"><Field label="X"><input type="number" value={formatNumber(selectedFrame.x)} onChange={event=>updateFrame({x:Number(event.target.value)||0})}/></Field><Field label="Y"><input type="number" value={formatNumber(selectedFrame.y)} onChange={event=>updateFrame({y:Number(event.target.value)||0})}/></Field></div>
+            <div className="field-grid"><Field label="Width"><input type="number" min="80" value={formatNumber(selectedFrame.width)} onChange={event=>updateFrame({width:Math.max(80,Number(event.target.value)||80)})}/></Field><Field label="Height"><input type="number" min="80" value={formatNumber(selectedFrame.height)} onChange={event=>updateFrame({height:Math.max(80,Number(event.target.value)||80)})}/></Field></div>
+            <Field label={`Density ${selectedFrame.density}`}><input type="range" min="2" max="12" value={selectedFrame.density} onChange={event=>updateFrame({density:Number(event.target.value)})}/></Field>
+            <Field label={`Ornament depth ${selectedFrame.depth}`}><input type="range" min="1" max="6" value={selectedFrame.depth} onChange={event=>updateFrame({depth:Number(event.target.value)})}/></Field>
+            <div className="field-grid"><Field label="Seed"><input type="number" value={selectedFrame.seed} onChange={event=>updateFrame({seed:Number(event.target.value)||1})}/></Field><button className="secondary-button randomize-frame" onClick={()=>updateFrame({seed:Math.floor(Math.random()*999999)})}>Randomize</button></div>
+            <div className="keybindings-help">Uses only glyphs verified in the bundled Radiance font. Resize with the bottom-right handle; the ornament regenerates live.</div>
+            <button className="primary-button trace-button" onClick={convertFrame}>Convert to editable symbols</button><button className="danger-button" onClick={deleteFrame}>Delete frame</button>
+          </div> : selectedReference ? <div className="inspector-body">
             <div className="reference-name"><span>REFERENCE IMAGE</span><b title={selectedReference.name}>{selectedReference.name}</b></div>
             <button className={`reference-lock-button ${selectedReference.locked ? 'active' : ''}`} onClick={() => {updateReference({locked: !selectedReference.locked}); setStatus(selectedReference.locked ? 'Reference unlocked' : 'Reference locked')}}>{selectedReference.locked ? '◆ Position locked' : '◇ Lock position'}</button>
             <Field label={`Opacity ${Math.round((selectedReference.opacity ?? .62) * 100)}%`}><input type="range" min="5" max="100" value={Math.round((selectedReference.opacity ?? .62) * 100)} onChange={event => updateReference({opacity: Number(event.target.value) / 100})}/></Field>
