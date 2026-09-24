@@ -71,6 +71,18 @@ type ReferenceImage = {
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
 const formatNumber = (value: number) => Number.isFinite(value) ? Number(value.toFixed(3)) : 0
 const GRID_UNIT = 5
+// Current Dota 2 hero grid: DOTAHeroGridNew is 1204 × 678; its footer is 66px.
+// GridCategories fills the remaining scrollable area. This is a guide, not a limit.
+const DOTA_VIEWPORT = {width: 1204, height: 612} as const
+
+function viewFittingDotaViewport(canvas: HTMLCanvasElement | null, calibration: Calibration): View {
+  const rect = canvas?.getBoundingClientRect()
+  if (!rect?.width || !rect.height) return {x: 90, y: 70, zoom: 1}
+  const start = dotaToCanvas(0, 0, calibration)
+  const end = dotaToCanvas(DOTA_VIEWPORT.width, DOTA_VIEWPORT.height, calibration)
+  const zoom = Math.max(.05, Math.min(1, (rect.width - 64) / Math.abs(end.x - start.x), (rect.height - 64) / Math.abs(end.y - start.y)))
+  return {x: rect.width / 2 - (start.x + end.x) * zoom / 2, y: rect.height / 2 - (start.y + end.y) * zoom / 2, zoom}
+}
 
 function App() {
   const [document, setDocument] = useState<DotaDocument>(() => emptyDocument())
@@ -83,6 +95,7 @@ function App() {
   const [view, setView] = useState<View>({x: 90, y: 70, zoom: 1})
   const [calibration] = useState<Calibration>(defaultCalibration)
   const [showGrid, setShowGrid] = useState(true)
+  const [showDotaViewport, setShowDotaViewport] = useState(true)
   const [renderSettings, setRenderSettings] = useState<RenderSettings>({...defaultRenderSettings})
   const [keybindings, setKeybindings] = useState<Keybindings>({...defaultKeybindings})
   const [palette, setPalette] = useState<string[]>([...defaultPalette])
@@ -243,10 +256,16 @@ function App() {
     return closest
   }, [calibration, categories, hidden, screenToDotaPoint, view.zoom])
 
+  const fitToDotaViewport = useCallback(() => {
+    setView(viewFittingDotaViewport(canvasRef.current, calibration))
+  }, [calibration])
+
+  useEffect(() => { fitToDotaViewport() }, [fitToDotaViewport])
+
   const fitToContent = useCallback(() => {
     const canvas = canvasRef.current
     if (!canvas || (categories.length === 0 && referenceImages.length === 0)) {
-      setView({x: 90, y: 70, zoom: 1})
+      fitToDotaViewport()
       return
     }
     const rect = canvas.getBoundingClientRect()
@@ -265,7 +284,7 @@ function App() {
     const b = dotaToCanvas(maxX, maxY, calibration)
     const zoom = Math.max(.05, Math.min(8, Math.min((rect.width - 120) / Math.max(1, b.x - a.x), (rect.height - 120) / Math.max(1, b.y - a.y))))
     setView({x: rect.width / 2 - (a.x + b.x) / 2 * zoom, y: rect.height / 2 - (a.y + b.y) / 2 * zoom, zoom})
-  }, [calibration, categories, hidden, referenceImages, renderSettings])
+  }, [calibration, categories, fitToDotaViewport, hidden, referenceImages, renderSettings])
 
   const loadFilePayload = useCallback((result: FilePayload, preferredConfig = 0) => {
     const parsed = normaliseDocument(JSON.parse(result.content))
@@ -403,6 +422,19 @@ function App() {
     ctx.moveTo(0, view.y + origin.y * view.zoom + .5); ctx.lineTo(rect.width, view.y + origin.y * view.zoom + .5)
     ctx.stroke()
 
+    if (showDotaViewport) {
+      const corner = dotaToCanvas(DOTA_VIEWPORT.width, DOTA_VIEWPORT.height, calibration)
+      const left = Math.round(view.x + origin.x * view.zoom)
+      const top = Math.round(view.y + origin.y * view.zoom)
+      const right = Math.round(view.x + corner.x * view.zoom)
+      const bottom = Math.round(view.y + corner.y * view.zoom)
+      ctx.save()
+      ctx.strokeStyle = 'rgba(147, 171, 193, .72)'
+      ctx.lineWidth = 1
+      ctx.strokeRect(left + .5, top + .5, right - left, bottom - top)
+      ctx.restore()
+    }
+
     frames.forEach(source => {
       const frame = resolvedFrame(source)
       frameCategories(frame).forEach(item => {
@@ -485,7 +517,7 @@ function App() {
       ctx.strokeRect(x + .5, y + .5, Math.max(0, width - 1), Math.max(0, height - 1))
       ctx.restore()
     }
-  }, [calibration, categories, frames, hidden, locked, primaryIndex, referenceImages, renderSettings, selected, selectedFrameId, selectedReference, selectedReferenceId, showGrid, view])
+  }, [calibration, categories, frames, hidden, locked, primaryIndex, referenceImages, renderSettings, selected, selectedFrameId, selectedReference, selectedReferenceId, showDotaViewport, showGrid, view])
 
   const scheduleDraw = useCallback(() => {
     if (drawFrameRef.current !== null) return
@@ -1163,7 +1195,7 @@ function App() {
 
   const newDocument = () => {
     const next = emptyDocument(); setDocument(next); documentRef.current = next; setConfigIndex(0); setSelected([]); setPath(''); setDirty(false)
-    setHidden(new Set()); setLocked(new Set()); clearReferenceImages(); historyRef.current = {past: [], future: []}; setView({x: 90, y: 70, zoom: 1}); setStatus('New document')
+    setHidden(new Set()); setLocked(new Set()); clearReferenceImages(); historyRef.current = {past: [], future: []}; fitToDotaViewport(); setStatus('New document')
   }
 
   const addConfig = () => {
@@ -1280,7 +1312,7 @@ function App() {
             <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Select (V)">↖</button>
             <button className={tool === 'symbol' ? 'active' : ''} onClick={() => setTool('symbol')} title="Symbol tool">T</button>
             <button className={tool === 'pan' ? 'active' : ''} onClick={() => setTool('pan')} title="Pan (Space)">✥</button>
-            <span className="toolbar-divider"/><button onClick={addFrame} title="Add procedural frame">▣</button><button onClick={fitToContent} title="Fit to content">⌗</button>
+            <span className="toolbar-divider"/><button onClick={addFrame} title="Add procedural frame">▣</button><button onClick={fitToContent} title="Fit to content">⌗</button><button onClick={fitToDotaViewport} title="Fit Dota visible area">□</button>
           </div>
           <canvas ref={canvasRef} className={`canvas tool-${tool} ${spaceDown ? 'is-panning' : ''}`} onContextMenu={event => event.preventDefault()} onWheel={onWheel} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={() => finishPointerAction(true)} onPointerCancel={() => finishPointerAction(false)}/>
           <div className="canvas-hint">Drag empty space to select · Wheel to zoom · Middle mouse / Space to pan</div>
@@ -1322,6 +1354,7 @@ function App() {
           <section className="properties-section canvas-settings">
             <div className="section-heading"><span>CANVAS</span></div>
             <label className="check-row"><input type="checkbox" checked={showGrid} onChange={event => setShowGrid(event.target.checked)}/><span>Show grid</span></label>
+            <label className="check-row" title="Guide only: Dota can scroll to content outside this area"><input type="checkbox" checked={showDotaViewport} onChange={event => setShowDotaViewport(event.target.checked)}/><span>Dota visible area · 1204 × 612</span></label>
             <label className="check-row"><input type="checkbox" checked={renderSettings.glow} onChange={event => updateRenderSetting('glow', event.target.checked)}/><span>Glow</span></label>
           </section>
         </aside>
