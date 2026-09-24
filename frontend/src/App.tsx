@@ -32,10 +32,12 @@ import {
   defaultPalette,
   defaultPreferences,
   keybindingsForPalette,
+  maxPaletteItems,
   matchesShortcut,
   mergePreferences,
   shortcutFromEvent,
 } from './preferences'
+import {symbolLibrary, unverifiedLibrarySymbols} from './symbolLibrary'
 
 type Tool = 'select' | 'symbol' | 'pan'
 type View = {x: number; y: number; zoom: number}
@@ -89,7 +91,8 @@ function App() {
   const [settingsPath, setSettingsPath] = useState('')
   const [settingsReady, setSettingsReady] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [settingsPage, setSettingsPage] = useState<'render' | 'palette' | 'keybindings'>('render')
+  const [settingsPage, setSettingsPage] = useState<'render' | 'palette' | 'library' | 'keybindings'>('render')
+  const [librarySearch, setLibrarySearch] = useState('')
   const [search, setSearch] = useState('')
   const [hidden, setHidden] = useState<Set<number>>(() => new Set())
   const [locked, setLocked] = useState<Set<number>>(() => new Set())
@@ -1177,17 +1180,18 @@ function App() {
     changeCategories(new Map([[primaryIndex, {[field]: parsed}]]))
   }
 
-  const addPaletteItem = () => {
-    const item = paletteDraft.trim()
+  const addPaletteItem = (item = paletteDraft.trim(), selectItem = true) => {
     if (!item) { setStatus('Palette item cannot be empty'); return }
     if (palette.includes(item)) { setStatus(`“${item}” is already in the palette`); return }
-    if (palette.length >= 64) { setStatus('The palette is limited to 64 entries'); return }
+    if (palette.length >= maxPaletteItems) { setStatus(`The palette is limited to ${maxPaletteItems} entries`); return }
     const nextPalette = [...palette, item]
     setPalette(nextPalette)
     setKeybindings(current => ({...keybindingsForPalette(nextPalette, current), [`symbol.${nextPalette.length - 1}`]: ''} as Keybindings))
-    setPaletteDraft('')
-    setSymbol(item)
-    setTool('symbol')
+    if (selectItem) {
+      setPaletteDraft('')
+      setSymbol(item)
+      setTool('symbol')
+    }
     setStatus(`Added “${item}” to the palette`)
   }
 
@@ -1205,6 +1209,12 @@ function App() {
     setPalette(nextPalette)
     if (symbol === removed) setSymbol(nextPalette[0] ?? '')
     setStatus(`Removed “${removed}” from the palette`)
+  }
+
+  const toggleLibrarySymbol = (item: string) => {
+    const index = palette.indexOf(item)
+    if (index >= 0) removePaletteItem(index)
+    else addPaletteItem(item, false)
   }
 
   const resetPalette = () => {
@@ -1330,7 +1340,7 @@ function App() {
       {settingsOpen && <div className="modal-backdrop" onPointerDown={event => {if (event.target === event.currentTarget) setSettingsOpen(false)}}>
         <section className="settings-modal" role="dialog" aria-modal="true" aria-label="Application settings">
           <header className="settings-title"><div><span>SETTINGS</span><b>Dota Grid Studio preferences</b></div><button onClick={() => setSettingsOpen(false)}>×</button></header>
-          <nav className="settings-tabs"><button className={settingsPage === 'render' ? 'active' : ''} onClick={() => setSettingsPage('render')}>Renderer</button><button className={settingsPage === 'palette' ? 'active' : ''} onClick={() => setSettingsPage('palette')}>Palette</button><button className={settingsPage === 'keybindings' ? 'active' : ''} onClick={() => setSettingsPage('keybindings')}>Key bindings</button></nav>
+          <nav className="settings-tabs"><button className={settingsPage === 'render' ? 'active' : ''} onClick={() => setSettingsPage('render')}>Renderer</button><button className={settingsPage === 'palette' ? 'active' : ''} onClick={() => setSettingsPage('palette')}>Palette</button><button className={settingsPage === 'library' ? 'active' : ''} onClick={() => setSettingsPage('library')}>Symbol library</button><button className={settingsPage === 'keybindings' ? 'active' : ''} onClick={() => setSettingsPage('keybindings')}>Key bindings</button></nav>
           {settingsPage === 'render' ? <div className="settings-content">
             <div className="settings-group">
               <h3>Dota renderer</h3>
@@ -1348,9 +1358,22 @@ function App() {
             </div>
           </div> : settingsPage === 'palette' ? <div className="palette-settings-page">
             <div className="keybindings-help">Add any symbol or complete string. New entries are saved beside the executable and can receive a shortcut on the Key bindings tab.</div>
-            <div className="palette-add-row"><input autoFocus value={paletteDraft} maxLength={80} placeholder="Symbol or string" onChange={event => setPaletteDraft(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') {event.preventDefault(); addPaletteItem()}}}/><button className="primary-button" onClick={addPaletteItem}>Add to palette</button></div>
+            <div className="palette-add-row"><input autoFocus value={paletteDraft} maxLength={80} placeholder="Symbol or string" onChange={event => setPaletteDraft(event.target.value)} onKeyDown={event => {if (event.key === 'Enter') {event.preventDefault(); addPaletteItem()}}}/><button className="primary-button" onClick={() => addPaletteItem()}>Add to palette</button></div>
             <div className="palette-settings-list">{palette.map((item, index) => <div className="palette-settings-row" key={`${index}:${item}`}><span className="palette-preview">{item}</span><code>{keybindings[`symbol.${index}` as CommandId] || 'Unassigned'}</code><button title={`Remove ${item}`} onClick={() => removePaletteItem(index)}>×</button></div>)}</div>
             {!palette.length && <div className="empty-list">The palette is empty. Add a symbol or string above.</div>}
+          </div> : settingsPage === 'library' ? <div className="symbol-library-page">
+            <div className="keybindings-help">Only glyphs present in the bundled Radiance SemiBold font are offered here. It matches the locally installed Dota 2 font byte-for-byte. Click a glyph to add or remove it from the palette; your choices are saved automatically. This checks font coverage, not every possible in-game fallback.</div>
+            <input className="library-search" value={librarySearch} onChange={event => setLibrarySearch(event.target.value)} placeholder="Find a glyph or group…" aria-label="Search symbol library"/>
+            {symbolLibrary.map(group => {
+              const items = group.symbols.filter(item => item.includes(librarySearch.trim()) || group.group.toLowerCase().includes(librarySearch.trim().toLowerCase()))
+              return items.length ? <section className="library-group" key={group.group}><h3>{group.group}</h3><div className="library-symbol-grid">{items.map(item => {
+                const enabled = palette.includes(item)
+                const codepoint = `U+${item.codePointAt(0)!.toString(16).toUpperCase().padStart(4, '0')}`
+                return <button key={item} type="button" className={`library-symbol ${enabled ? 'enabled' : ''}`} aria-pressed={enabled} aria-label={`${item} (${codepoint}), ${enabled ? 'remove from' : 'add to'} palette`} title={`${codepoint} · ${enabled ? 'In palette' : 'Add to palette'}`} onClick={() => toggleLibrarySymbol(item)}><span>{item}</span><small>{codepoint}</small></button>
+              })}</div></section> : null
+            })}
+            {!symbolLibrary.some(group => group.symbols.some(item => item.includes(librarySearch.trim()) || group.group.toLowerCase().includes(librarySearch.trim().toLowerCase()))) && <div className="empty-list">No verified symbols match this search.</div>}
+            <section className="library-unverified"><h3>Not in Radiance — not offered as verified</h3><p>Neither filled nor outline heart has a glyph in the game's Radiance SemiBold font; the same is true of stars, music notes and Japanese glyphs. Some may work through Dota's fallback, but font inspection cannot establish which ones, so they are not marked safe here. You can add them manually on the Palette tab and test in-game.</p><div>{unverifiedLibrarySymbols.map(item => <span key={item.symbol} title={item.description}>{item.symbol}</span>)}</div></section>
           </div> : <div className="keybindings-page">
             <div className="keybindings-help">Click a shortcut and press a new combination. Backspace clears it. Duplicate shortcuts are highlighted.</div>
             {(['Editor', 'Tools', 'Symbols'] as const).map(group => <section className="binding-group" key={group}><h3>{group}</h3><div className="binding-grid">{commandLabels.filter(command => command.group === group).map(command => {
@@ -1363,7 +1386,7 @@ function App() {
               }}/></label>
             })}</div></section>)}
           </div>}
-          <footer className="settings-actions"><button className="secondary-button" onClick={() => settingsPage === 'render' ? setRenderSettings({...defaultRenderSettings}) : settingsPage === 'palette' ? resetPalette() : setKeybindings(keybindingsForPalette(palette))}>Reset {settingsPage === 'render' ? 'renderer' : settingsPage === 'palette' ? 'palette' : 'bindings'}</button><button className="primary-button" onClick={() => setSettingsOpen(false)}>Done</button></footer>
+          <footer className="settings-actions">{settingsPage !== 'library' && <button className="secondary-button" onClick={() => settingsPage === 'render' ? setRenderSettings({...defaultRenderSettings}) : settingsPage === 'palette' ? resetPalette() : setKeybindings(keybindingsForPalette(palette))}>Reset {settingsPage === 'render' ? 'renderer' : settingsPage === 'palette' ? 'palette' : 'bindings'}</button>}<button className="primary-button" onClick={() => setSettingsOpen(false)}>Done</button></footer>
         </section>
       </div>}
 

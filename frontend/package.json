@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "verify:symbols": "node scripts/verify-symbol-library.cjs",
     "preview": "vite preview"
   },
   "dependencies": {

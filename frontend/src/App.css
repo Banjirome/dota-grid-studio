@@ -178,6 +178,23 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--accent); ou
 .palette-settings-row code { overflow: hidden; color: #646b74; font-size: 8px; text-align: right; white-space: nowrap; text-overflow: ellipsis; }
 .palette-settings-row button { width: 28px; height: 28px; border-radius: 3px; color: #7a8088; font-size: 18px; }
 .palette-settings-row button:hover { color: #fff; background: #4b2421; }
+.symbol-library-page { min-height: 0; flex: 1; overflow-y: auto; padding: 14px 18px 22px; }
+.library-search { width: 100%; height: 34px; margin-bottom: 14px; padding: 0 10px; border: 1px solid #30353d; border-radius: 4px; outline: none; background: #0e1115; color: #d8dce0; font-size: 11px; }
+.library-search:focus { border-color: var(--accent); }
+.library-group { margin-bottom: 18px; }
+.library-group h3, .library-unverified h3 { margin: 0 0 9px; color: #8d949d; font-size: 10px; letter-spacing: .8px; text-transform: uppercase; }
+.library-symbol-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 7px; }
+.library-symbol { height: 62px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; border: 1px solid #303640; border-radius: 5px; background: #101419; color: #8997aa; cursor: pointer; }
+.library-symbol:hover { border-color: #6a7889; background: #1b222b; }
+.library-symbol.enabled { border-color: #a35a55; background: #281b1d; color: #e4b0ac; }
+.library-symbol.enabled:hover { border-color: #d17b73; }
+.library-symbol span { font: 600 21px "DotaRadiance", sans-serif; line-height: 1; }
+.library-symbol small { color: #6f7883; font-size: 8px; }
+.library-symbol.enabled small { color: #a98584; }
+.library-unverified { margin-top: 20px; padding: 12px; border: 1px solid #34383e; border-radius: 5px; background: #111419; }
+.library-unverified p { margin: 0 0 10px; color: #818995; font-size: 10px; line-height: 1.5; }
+.library-unverified div { display: flex; gap: 8px; }
+.library-unverified span { width: 33px; height: 33px; display: grid; place-items: center; border: 1px solid #30343b; border-radius: 4px; color: #6a707a; font-size: 19px; }
 .keybindings-help { margin-bottom: 14px; padding: 8px 10px; border: 1px solid #293039; border-radius: 4px; background: #11151a; color: #737a83; font-size: 9px; }
 .binding-group { margin-bottom: 17px; }
 .binding-group h3 { margin: 0 0 8px; color: #777e87; font-size: 9px; letter-spacing: 1px; text-transform: uppercase; }

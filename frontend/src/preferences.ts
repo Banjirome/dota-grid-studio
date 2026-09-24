@@ -23,6 +23,7 @@ export const symbolBindings = [
 ] as const
 
 export const defaultPalette: string[] = symbolBindings.map(([symbol]) => symbol)
+export const maxPaletteItems = 256
 
 export const editorCommandLabels: Array<{id: CommandId; label: string; group: 'Editor' | 'Tools'}> = [
   {id: 'undo', label: 'Undo', group: 'Editor'},
@@ -107,7 +108,7 @@ export function matchesShortcut(event: KeyboardEvent, shortcut: string) {
 export function mergePreferences(value: Partial<AppPreferences>): AppPreferences {
   const defaults = defaultPreferences()
   const palette = Array.isArray(value.palette)
-    ? value.palette.filter(item => typeof item === 'string').map(item => item.trim()).filter((item, index, all) => item.length > 0 && all.indexOf(item) === index).slice(0, 64)
+    ? value.palette.filter(item => typeof item === 'string').map(item => item.trim()).filter((item, index, all) => item.length > 0 && all.indexOf(item) === index).slice(0, maxPaletteItems)
     : [...defaultPalette]
   const savedBindings: Partial<Keybindings> = {...(value.keybindings ?? {})}
   if ((value.version ?? 1) < 2 && savedBindings.redo === 'Ctrl+Alt+Z') savedBindings.redo = 'Ctrl+Shift+Z'
